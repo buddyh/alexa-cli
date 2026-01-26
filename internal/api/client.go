@@ -567,7 +567,7 @@ func (c *Client) ControlSmartHome(entityID string, action string, value interfac
 		return fmt.Errorf("unknown action: %s", action)
 	}
 
-	_, err := c.request("PUT", "/api/behaviors/entities/appliances/state", payload)
+	_, err := c.requestAlexa("PUT", "/api/phoenix/state", payload)
 	return err
 }
 
