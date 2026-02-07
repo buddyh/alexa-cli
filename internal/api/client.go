@@ -165,11 +165,35 @@ func (c *Client) fetchCSRF() error {
 
 // baseURL returns the Alexa API base URL
 func (c *Client) baseURL() string {
-	// pitangui for US, layla for EU
-	if c.amazonDomain == "amazon.com" {
+	// pitangui for US, layla for EU/UK
+	// The subdomain changes based on region, but the TLD matches the user's amazon domain
+	switch c.amazonDomain {
+	case "amazon.com":
 		return "https://pitangui.amazon.com"
+	case "amazon.co.uk":
+		return "https://layla.amazon.co.uk"
+	case "amazon.de":
+		return "https://layla.amazon.de"
+	case "amazon.fr":
+		return "https://layla.amazon.fr"
+	case "amazon.it":
+		return "https://layla.amazon.it"
+	case "amazon.es":
+		return "https://layla.amazon.es"
+	case "amazon.co.jp":
+		return "https://layla.amazon.co.jp"
+	case "amazon.com.au":
+		return "https://alexa.amazon.com.au"
+	case "amazon.ca":
+		return "https://pitangui.amazon.ca"
+	case "amazon.com.br":
+		return "https://pitangui.amazon.com.br"
+	case "amazon.in":
+		return "https://pitangui.amazon.in"
+	default:
+		// Fall back to layla with the user's domain
+		return fmt.Sprintf("https://layla.%s", c.amazonDomain)
 	}
-	return "https://layla.amazon.com"
 }
 
 // alexaURL returns the alexa.amazon.com base URL
@@ -190,15 +214,22 @@ func (c *Client) requestAlexa(method, endpoint string, body interface{}) ([]byte
 // doRequest makes an authenticated request to the specified base URL
 func (c *Client) doRequest(baseURL, method, endpoint string, body interface{}) ([]byte, error) {
 	var reqBody io.Reader
+	var jsonBodyStr string
 	if body != nil {
 		jsonBody, err := json.Marshal(body)
 		if err != nil {
 			return nil, err
 		}
+		jsonBodyStr = string(jsonBody)
 		reqBody = bytes.NewReader(jsonBody)
 	}
 
 	fullURL := baseURL + endpoint
+	c.log("Request: %s %s", method, fullURL)
+	if jsonBodyStr != "" {
+		c.log("Request body: %s", jsonBodyStr[:min(500, len(jsonBodyStr))])
+	}
+
 	req, err := http.NewRequest(method, fullURL, reqBody)
 	if err != nil {
 		return nil, err
@@ -211,6 +242,7 @@ func (c *Client) doRequest(baseURL, method, endpoint string, body interface{}) (
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		c.log("Request error: %v", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -220,7 +252,9 @@ func (c *Client) doRequest(baseURL, method, endpoint string, body interface{}) (
 		return nil, err
 	}
 
+	c.log("Response status: %d, body length: %d", resp.StatusCode, len(respBody))
 	if resp.StatusCode >= 400 {
+		c.log("Error response: %s", string(respBody))
 		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
 	}
 
@@ -284,11 +318,11 @@ func (c *Client) SequenceCommand(device *Device, command string) error {
 					"deviceType": "%s",
 					"deviceSerialNumber": "%s",
 					"customerId": "%s",
-					"locale": "en-US",
+					"locale": "%s",
 					"textToSpeak": %s
 				}
 			}
-		}`, device.DeviceType, device.SerialNumber, c.customerID, mustJSON(text))
+		}`, device.DeviceType, device.SerialNumber, c.customerID, c.locale(), mustJSON(text))
 
 	case strings.HasPrefix(command, "announcement:"):
 		text := strings.TrimPrefix(command, "announcement:")
@@ -302,7 +336,7 @@ func (c *Client) SequenceCommand(device *Device, command string) error {
 				"operationPayload": {
 					"expireAfter": "PT5S",
 					"content": [{
-						"locale": "en-US",
+						"locale": "%s",
 						"display": {"title": "Announcement", "body": %s},
 						"speak": {"type": "text", "value": %s}
 					}],
@@ -311,7 +345,7 @@ func (c *Client) SequenceCommand(device *Device, command string) error {
 					}
 				}
 			}
-		}`, mustJSON(text), mustJSON(text), c.customerID)
+		}`, c.locale(), mustJSON(text), mustJSON(text), c.customerID)
 
 	case strings.HasPrefix(command, "textcommand:"):
 		text := strings.TrimPrefix(command, "textcommand:")
@@ -327,10 +361,11 @@ func (c *Client) SequenceCommand(device *Device, command string) error {
 					"deviceType": "%s",
 					"deviceSerialNumber": "%s",
 					"customerId": "%s",
+					"locale": "%s",
 					"text": %s
 				}
 			}
-		}`, device.DeviceType, device.SerialNumber, c.customerID, mustJSON(text))
+		}`, device.DeviceType, device.SerialNumber, c.customerID, c.locale(), mustJSON(text))
 
 	case strings.HasPrefix(command, "automation:"):
 		routineName := strings.TrimPrefix(command, "automation:")
@@ -739,13 +774,54 @@ func mustJSON(v interface{}) string {
 	return string(data)
 }
 
+// locale returns the appropriate locale for the user's Amazon domain
+func (c *Client) locale() string {
+	switch c.amazonDomain {
+	case "amazon.com":
+		return "en-US"
+	case "amazon.co.uk":
+		return "en-GB"
+	case "amazon.de":
+		return "de-DE"
+	case "amazon.fr":
+		return "fr-FR"
+	case "amazon.it":
+		return "it-IT"
+	case "amazon.es":
+		return "es-ES"
+	case "amazon.co.jp":
+		return "ja-JP"
+	case "amazon.com.au":
+		return "en-AU"
+	case "amazon.ca":
+		return "en-CA"
+	case "amazon.com.br":
+		return "pt-BR"
+	case "amazon.in":
+		return "en-IN"
+	default:
+		return "en-US"
+	}
+}
+
 // ============================================================================
 // Alexa+ (LLM) Support
 // ============================================================================
 
 // avsURL returns the AVS API base URL
 func (c *Client) avsURL() string {
-	return "https://avs-alexa-12-na.amazon.com"
+	// AVS has regional endpoints
+	switch c.amazonDomain {
+	case "amazon.com", "amazon.ca", "amazon.com.br":
+		return "https://avs-alexa-12-na.amazon.com"
+	case "amazon.co.uk", "amazon.de", "amazon.fr", "amazon.it", "amazon.es", "amazon.in":
+		return "https://avs-alexa-eu.amazon.com"
+	case "amazon.co.jp":
+		return "https://avs-alexa-fe.amazon.com"
+	default:
+		// Default to EU for unknown domains (safer for most non-US users)
+		return "https://avs-alexa-eu.amazon.com"
+	}
 }
 
 // getBearerToken obtains an access token for AVS APIs

@@ -26,7 +26,7 @@ Examples:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := getFormatter(flags)
 
-			client, err := getClient()
+			client, err := getClientWithFlags(flags)
 			if err != nil {
 				return err
 			}

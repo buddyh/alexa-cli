@@ -12,7 +12,8 @@ import (
 )
 
 type rootFlags struct {
-	asJSON bool
+	asJSON  bool
+	verbose bool
 }
 
 func execute(args []string) error {
@@ -32,6 +33,7 @@ Get started by running 'alexacli auth' to configure your refresh token.`,
 	}
 
 	rootCmd.PersistentFlags().BoolVar(&flags.asJSON, "json", false, "Output as JSON")
+	rootCmd.PersistentFlags().BoolVarP(&flags.verbose, "verbose", "v", false, "Enable verbose debug output")
 
 	// Add commands
 	rootCmd.AddCommand(newAuthCmd(flags))
@@ -53,12 +55,26 @@ Get started by running 'alexacli auth' to configure your refresh token.`,
 
 // getClient creates an authenticated Alexa API client
 func getClient() (*api.Client, error) {
+	return getClientWithFlags(nil)
+}
+
+// getClientWithFlags creates an authenticated Alexa API client with optional flags
+func getClientWithFlags(flags *rootFlags) (*api.Client, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
 	}
 
-	return api.NewClient(cfg.RefreshToken, cfg.AmazonDomain)
+	client, err := api.NewClient(cfg.RefreshToken, cfg.AmazonDomain)
+	if err != nil {
+		return nil, err
+	}
+
+	if flags != nil && flags.verbose {
+		client.SetVerbose(true)
+	}
+
+	return client, nil
 }
 
 // getFormatter creates an output formatter
