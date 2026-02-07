@@ -29,30 +29,42 @@ make build
 
 ## Authentication
 
-This CLI uses Amazon's unofficial API (the same one the Alexa app uses). You'll need to obtain a refresh token using the [alexa-cookie-cli](https://github.com/adn77/alexa-cookie-cli) tool.
+This CLI uses Amazon's unofficial API (the same one the Alexa app uses). Authentication requires an Amazon refresh token, which `alexacli auth` can obtain automatically.
 
-### Step 1: Get your refresh token
-
-Download alexa-cookie-cli from the [releases page](https://github.com/adn77/alexa-cookie-cli/releases), then:
+### Browser Login (Recommended)
 
 ```bash
-# For US Amazon accounts
-./alexa-cookie-cli --amazonPage amazon.com --baseAmazonPage amazon.com --amazonPageProxyLanguage en_US --acceptLanguage en-US
+alexacli auth
 ```
 
-This opens a local proxy at http://127.0.0.1:8080. Log into your Amazon account there, and the refresh token will be displayed.
+This downloads [alexa-cookie-cli](https://github.com/adn77/alexa-cookie-cli) on first run, opens a browser at http://127.0.0.1:8080 for Amazon login, and automatically captures and saves your refresh token.
 
-### Step 2: Configure alexa-cli
+For non-US accounts:
 
 ```bash
-# Interactive
-alexacli auth
+alexacli auth --domain amazon.de
+alexacli auth --domain amazon.co.uk
+```
 
-# Direct
+### Manual Token
+
+```bash
+# Provide token directly
 alexacli auth <your-refresh-token>
 
 # Or set environment variable
 export ALEXA_REFRESH_TOKEN=<your-token>
+```
+
+### Credential Management
+
+```bash
+# Check auth status
+alexacli auth status
+alexacli auth status --verify    # also validate token against the API
+
+# Remove stored credentials
+alexacli auth logout
 ```
 
 Configuration is stored in `~/.alexa-cli/config.json`.
@@ -278,7 +290,9 @@ alexacli speak "test" -d Kitchen --json
 | `alexacli fragments <id>` | View Alexa+ conversation history | Working |
 | `alexacli askplus -c <id> <text>` | Send message to Alexa+ LLM | Working |
 | `alexacli play --url <url> -d <device>` | Play MP3 audio via SSML | Working |
-| `alexacli auth` | Configure authentication | Working |
+| `alexacli auth` | Browser login or manual token setup | Working |
+| `alexacli auth status` | Show auth status (with `--verify`) | Working |
+| `alexacli auth logout` | Remove stored credentials | Working |
 | `alexacli routine list` | List routines | WIP |
 | `alexacli routine run <name>` | Execute routine | WIP |
 | `alexacli sh list` | List smart home devices | WIP |
@@ -322,13 +336,22 @@ alexacli command "what's on my calendar today" -d Kitchen
 
 ## Token Refresh
 
-The refresh token is valid for approximately 14 days. If you get authentication errors, run `alexacli auth` again with a fresh token from alexa-cookie-cli.
+The refresh token is valid for approximately 14 days. If you get authentication errors, run `alexacli auth` again to re-authenticate.
 
 ## Troubleshooting
 
+### Debug mode
+
+Add `--verbose` or `-v` to any command to see API requests and responses:
+
+```bash
+alexacli devices -v
+alexacli command "turn on lights" -d Kitchen --verbose
+```
+
 ### "not configured" error
 
-Run `alexacli auth <token>` to configure your refresh token.
+Run `alexacli auth` to configure your refresh token.
 
 ### Device not found
 
