@@ -92,7 +92,82 @@ Or set the ALEXA_REFRESH_TOKEN environment variable.`,
 
 	cmd.Flags().StringVar(&domain, "domain", "amazon.com", "Amazon domain (amazon.com, amazon.de, amazon.co.uk, etc.)")
 
+	cmd.AddCommand(newAuthStatusCmd(flags))
+	cmd.AddCommand(newAuthLogoutCmd(flags))
+
 	return cmd
+}
+
+func newAuthStatusCmd(flags *rootFlags) *cobra.Command {
+	var verify bool
+
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show authentication status",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out := getFormatter(flags)
+
+			cfg, err := config.Load()
+			if err != nil {
+				return out.Success("Not configured. Run 'alexacli auth' to set up.")
+			}
+
+			// Mask token: show first 8 chars + ...
+			masked := cfg.RefreshToken
+			if len(masked) > 8 {
+				masked = masked[:8] + "..."
+			}
+
+			status := fmt.Sprintf("Domain: %s\nToken:  %s", cfg.AmazonDomain, masked)
+
+			if verify {
+				client, err := api.NewClient(cfg.RefreshToken, cfg.AmazonDomain)
+				if err != nil {
+					status += "\nStatus: invalid (authentication failed)"
+					return out.Success(status)
+				}
+				devices, err := client.GetDevices()
+				if err != nil {
+					status += "\nStatus: invalid (failed to list devices)"
+					return out.Success(status)
+				}
+				status += fmt.Sprintf("\nStatus: valid (%d devices)", len(devices))
+			}
+
+			path, _ := config.Path()
+			status += fmt.Sprintf("\nConfig: %s", path)
+
+			return out.Success(status)
+		},
+	}
+
+	cmd.Flags().BoolVar(&verify, "verify", false, "Verify token by calling the API")
+
+	return cmd
+}
+
+func newAuthLogoutCmd(flags *rootFlags) *cobra.Command {
+	return &cobra.Command{
+		Use:   "logout",
+		Short: "Remove stored credentials",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out := getFormatter(flags)
+
+			path, err := config.Path()
+			if err != nil {
+				return err
+			}
+
+			if err := os.Remove(path); err != nil {
+				if os.IsNotExist(err) {
+					return out.Success("No credentials found.")
+				}
+				return fmt.Errorf("failed to remove config: %w", err)
+			}
+
+			return out.Success(fmt.Sprintf("Credentials removed from %s", path))
+		},
+	}
 }
 
 // ensureCookieCLI checks for the alexa-cookie-cli binary and downloads it if missing.
