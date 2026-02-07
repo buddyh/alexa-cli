@@ -11,6 +11,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var version = "dev"
+
 type rootFlags struct {
 	asJSON  bool
 	verbose bool
@@ -30,6 +32,7 @@ and sending arbitrary voice commands.
 Get started by running 'alexacli auth' to configure your refresh token.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		Version:       version,
 	}
 
 	rootCmd.PersistentFlags().BoolVar(&flags.asJSON, "json", false, "Output as JSON")
