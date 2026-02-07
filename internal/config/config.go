@@ -37,6 +37,15 @@ func Dir() (string, error) {
 	return filepath.Join(home, configDirName), nil
 }
 
+// BinDir returns the path to the binary cache directory (~/.alexa-cli/bin/)
+func BinDir() (string, error) {
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "bin"), nil
+}
+
 // Load reads the configuration from disk
 func Load() (*Config, error) {
 	// Check environment variable first
