@@ -20,6 +20,7 @@ const cookieCLIVersion = "v5.0.1"
 
 func newAuthCmd(flags *rootFlags) *cobra.Command {
 	var domain string
+	var country string
 
 	cmd := &cobra.Command{
 		Use:   "auth [refresh-token]",
@@ -42,7 +43,7 @@ Or set the ALEXA_REFRESH_TOKEN environment variable.`,
 				token = args[0]
 			} else {
 				// Try browser-based auth flow
-				t, err := runBrowserAuth(domain)
+				t, err := runBrowserAuth(domain, country)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "Browser auth failed: %v\n", err)
 					fmt.Fprintf(os.Stderr, "Falling back to manual token entry.\n\n")
@@ -64,7 +65,7 @@ Or set the ALEXA_REFRESH_TOKEN environment variable.`,
 			}
 
 			// Validate the token by trying to authenticate
-			client, err := api.NewClient(token, domain)
+			client, err := api.NewClientWithLocal(token, domain, country)
 			if err != nil {
 				return fmt.Errorf("authentication failed: %w", err)
 			}
@@ -79,6 +80,7 @@ Or set the ALEXA_REFRESH_TOKEN environment variable.`,
 			cfg := &config.Config{
 				RefreshToken: token,
 				AmazonDomain: domain,
+				AmazonLocal:  country,
 			}
 
 			if err := config.Save(cfg); err != nil {
@@ -90,7 +92,8 @@ Or set the ALEXA_REFRESH_TOKEN environment variable.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&domain, "domain", "amazon.com", "Amazon domain (amazon.com, amazon.de, amazon.co.uk, etc.)")
+	cmd.Flags().StringVar(&domain, "domain", "amazon.com", "Base Amazon domain for login/token exchange (usually amazon.com)")
+	cmd.Flags().StringVar(&country, "country", "amazon.it", "Marketplace country page for login (e.g. amazon.it, amazon.de)")
 
 	cmd.AddCommand(newAuthStatusCmd(flags))
 	cmd.AddCommand(newAuthLogoutCmd(flags))
@@ -118,10 +121,10 @@ func newAuthStatusCmd(flags *rootFlags) *cobra.Command {
 				masked = masked[:8] + "..."
 			}
 
-			status := fmt.Sprintf("Domain: %s\nToken:  %s", cfg.AmazonDomain, masked)
+			status := fmt.Sprintf("Domain: %s\nLocal:  %s\nToken:  %s", cfg.AmazonDomain, cfg.AmazonLocal, masked)
 
 			if verify {
-				client, err := api.NewClient(cfg.RefreshToken, cfg.AmazonDomain)
+				client, err := api.NewClientWithLocal(cfg.RefreshToken, cfg.AmazonDomain, cfg.AmazonLocal)
 				if err != nil {
 					status += "\nStatus: invalid (authentication failed)"
 					return out.Success(status)
@@ -268,14 +271,21 @@ func localeFlags(domain string) []string {
 
 // runBrowserAuth launches alexa-cookie-cli to perform browser-based Amazon login.
 // Returns the captured refresh token.
-func runBrowserAuth(domain string) (string, error) {
+func runBrowserAuth(domain, country string) (string, error) {
+	if domain == "" {
+		domain = "amazon.com"
+	}
+	if country == "" {
+		country = domain
+	}
+
 	binPath, err := ensureCookieCLI()
 	if err != nil {
 		return "", err
 	}
 
-	args := []string{"-b", domain, "-p", domain}
-	args = append(args, localeFlags(domain)...)
+	args := []string{"-b", domain, "-p", country}
+	args = append(args, localeFlags(country)...)
 	args = append(args, "-q")
 
 	fmt.Fprintf(os.Stderr, "Opening browser for Amazon login at http://127.0.0.1:8080 ...\n")

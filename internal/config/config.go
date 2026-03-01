@@ -15,7 +15,8 @@ const (
 // Config holds the Alexa CLI configuration
 type Config struct {
 	RefreshToken string `json:"refresh_token"`
-	AmazonDomain string `json:"amazon_domain,omitempty"` // e.g., "amazon.com", "amazon.de"
+	AmazonDomain string `json:"amazon_domain,omitempty"` // auth domain, e.g. amazon.com
+	AmazonLocal  string `json:"amazon_local,omitempty"`  // local marketplace/runtime domain, e.g. amazon.it
 	DeviceSerial string `json:"default_device,omitempty"`
 }
 
@@ -53,6 +54,7 @@ func Load() (*Config, error) {
 		return &Config{
 			RefreshToken: token,
 			AmazonDomain: getEnvOrDefault("ALEXA_AMAZON_DOMAIN", "amazon.com"),
+			AmazonLocal:  os.Getenv("ALEXA_AMAZON_LOCAL"),
 		}, nil
 	}
 
@@ -81,6 +83,9 @@ func Load() (*Config, error) {
 	// Default domain
 	if cfg.AmazonDomain == "" {
 		cfg.AmazonDomain = "amazon.com"
+	}
+	if cfg.AmazonLocal == "" {
+		cfg.AmazonLocal = cfg.AmazonDomain
 	}
 
 	return &cfg, nil

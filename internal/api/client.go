@@ -18,7 +18,8 @@ type Client struct {
 	cookies        string
 	csrf           string
 	activityCSRF   string // separate CSRF for activity/history endpoints
-	amazonDomain   string // e.g., "amazon.com"
+	amazonDomain   string // auth domain, e.g., "amazon.com"
+	amazonLocal    string // local marketplace/runtime domain, e.g., "amazon.it"
 	customerID     string
 	bearerToken    string // Atna| token for AVS APIs
 	conversationID string // Current conversation ID for Alexa+
@@ -37,13 +38,28 @@ func (c *Client) log(format string, args ...interface{}) {
 	}
 }
 
+func (c *Client) localDomain() string {
+	if c.amazonLocal != "" {
+		return c.amazonLocal
+	}
+	return c.amazonDomain
+}
+
 // NewClient creates a new Alexa API client
 func NewClient(refreshToken, amazonDomain string) (*Client, error) {
+	return NewClientWithLocal(refreshToken, amazonDomain, "")
+}
+
+func NewClientWithLocal(refreshToken, amazonDomain, amazonLocal string) (*Client, error) {
+	if amazonLocal == "" {
+		amazonLocal = amazonDomain
+	}
 	client := &Client{
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 		amazonDomain: amazonDomain,
+		amazonLocal:  amazonLocal,
 		refreshToken: refreshToken,
 	}
 
@@ -125,31 +141,38 @@ func (c *Client) authenticate(refreshToken string) error {
 
 // fetchCSRF retrieves the CSRF token from Amazon
 func (c *Client) fetchCSRF() error {
-	// Use the language API endpoint which returns CSRF as a cookie
-	csrfURL := fmt.Sprintf("https://alexa.%s/api/language", c.amazonDomain)
-
-	req, err := http.NewRequest("GET", csrfURL, nil)
-	if err != nil {
-		return err
+	tryURLs := []string{
+		fmt.Sprintf("https://alexa.%s/api/language", c.localDomain()),
+		fmt.Sprintf("https://alexa.%s/api/language", c.amazonDomain),
+		"https://alexa.amazon.com/api/language",
+		"https://layla.amazon.com/api/language",
+		"https://pitangui.amazon.com/api/language",
 	}
 
-	req.Header.Set("Cookie", c.cookies)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	// Extract csrf from response cookies
-	for _, cookie := range resp.Cookies() {
-		if cookie.Name == "csrf" {
-			c.csrf = cookie.Value
-			// Also add csrf to our cookie string for future requests
-			c.cookies = c.cookies + "; csrf=" + cookie.Value
-			return nil
+	for _, csrfURL := range tryURLs {
+		req, err := http.NewRequest("GET", csrfURL, nil)
+		if err != nil {
+			continue
 		}
+		req.Header.Set("Cookie", c.cookies)
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			continue
+		}
+
+		for _, cookie := range resp.Cookies() {
+			if cookie.Name == "csrf" {
+				resp.Body.Close()
+				c.csrf = cookie.Value
+				if !strings.Contains(c.cookies, "csrf=") {
+					c.cookies = c.cookies + "; csrf=" + cookie.Value
+				}
+				return nil
+			}
+		}
+		resp.Body.Close()
 	}
 
 	// Try to extract from existing cookies (may already be present)
@@ -166,20 +189,12 @@ func (c *Client) fetchCSRF() error {
 // baseURL returns the Alexa API base URL
 func (c *Client) baseURL() string {
 	// pitangui for US, layla for EU/UK
-	// The subdomain changes based on region, but the TLD matches the user's amazon domain
-	switch c.amazonDomain {
+	// Runtime is based on local marketplace domain
+	switch c.localDomain() {
 	case "amazon.com":
 		return "https://pitangui.amazon.com"
-	case "amazon.co.uk":
-		return "https://layla.amazon.co.uk"
-	case "amazon.de":
-		return "https://layla.amazon.de"
-	case "amazon.fr":
-		return "https://layla.amazon.fr"
-	case "amazon.it":
-		return "https://layla.amazon.it"
-	case "amazon.es":
-		return "https://layla.amazon.es"
+	case "amazon.co.uk", "amazon.de", "amazon.fr", "amazon.it", "amazon.es":
+		return "https://layla.amazon.com"
 	case "amazon.co.jp":
 		return "https://layla.amazon.co.jp"
 	case "amazon.com.au":
@@ -192,13 +207,13 @@ func (c *Client) baseURL() string {
 		return "https://pitangui.amazon.in"
 	default:
 		// Fall back to layla with the user's domain
-		return fmt.Sprintf("https://layla.%s", c.amazonDomain)
+		return fmt.Sprintf("https://layla.%s", c.localDomain())
 	}
 }
 
 // alexaURL returns the alexa.amazon.com base URL
 func (c *Client) alexaURL() string {
-	return fmt.Sprintf("https://alexa.%s", c.amazonDomain)
+	return fmt.Sprintf("https://alexa.%s", c.localDomain())
 }
 
 // request makes an authenticated request to the Alexa API (pitangui/layla)
@@ -263,13 +278,13 @@ func (c *Client) doRequest(baseURL, method, endpoint string, body interface{}) (
 
 // Device represents an Alexa device
 type Device struct {
-	AccountName               string `json:"accountName"`
-	SerialNumber              string `json:"serialNumber"`
-	DeviceType                string `json:"deviceType"`
-	DeviceFamily              string `json:"deviceFamily"`
-	DeviceOwnerCustomerID     string `json:"deviceOwnerCustomerId"`
-	Online                    bool   `json:"online"`
-	Capabilities              []string `json:"capabilities"`
+	AccountName           string   `json:"accountName"`
+	SerialNumber          string   `json:"serialNumber"`
+	DeviceType            string   `json:"deviceType"`
+	DeviceFamily          string   `json:"deviceFamily"`
+	DeviceOwnerCustomerID string   `json:"deviceOwnerCustomerId"`
+	Online                bool     `json:"online"`
+	Capabilities          []string `json:"capabilities"`
 }
 
 // GetDevices returns all Alexa devices
@@ -410,9 +425,9 @@ func (c *Client) ExecuteRoutine(device *Device, routineName string) error {
 
 	// Execute the routine
 	payload := map[string]interface{}{
-		"behaviorId": targetRoutine.AutomationID,
+		"behaviorId":   targetRoutine.AutomationID,
 		"sequenceJson": targetRoutine.Sequence,
-		"status": "ENABLED",
+		"status":       "ENABLED",
 	}
 
 	_, err = c.request("POST", "/api/behaviors/preview", payload)
@@ -435,8 +450,8 @@ func (c *Client) GetRoutines() ([]Routine, error) {
 	}
 
 	var rawRoutines []struct {
-		AutomationID string `json:"automationId"`
-		Name         string `json:"name"`
+		AutomationID string          `json:"automationId"`
+		Name         string          `json:"name"`
 		Sequence     json.RawMessage `json:"sequence"`
 	}
 
@@ -458,12 +473,12 @@ func (c *Client) GetRoutines() ([]Routine, error) {
 
 // SmartHomeDevice represents a smart home device
 type SmartHomeDevice struct {
-	EntityID     string `json:"entityId"`
-	ApplianceID  string `json:"applianceId"`
-	Name         string `json:"friendlyName"`
-	Description  string `json:"friendlyDescription"`
-	Type         string `json:"applianceTypes"`
-	Reachable    bool   `json:"isReachable"`
+	EntityID    string `json:"entityId"`
+	ApplianceID string `json:"applianceId"`
+	Name        string `json:"friendlyName"`
+	Description string `json:"friendlyDescription"`
+	Type        string `json:"applianceTypes"`
+	Reachable   bool   `json:"isReachable"`
 }
 
 // GetSmartHomeDevices returns all smart home devices
@@ -503,7 +518,7 @@ func (c *Client) ControlSmartHome(entityID string, action string, value interfac
 		payload = map[string]interface{}{
 			"controlRequests": []map[string]interface{}{
 				{
-					"entityId":  entityID,
+					"entityId":   entityID,
 					"entityType": "APPLIANCE",
 					"parameters": map[string]interface{}{
 						"action": "turnOn",
@@ -515,7 +530,7 @@ func (c *Client) ControlSmartHome(entityID string, action string, value interfac
 		payload = map[string]interface{}{
 			"controlRequests": []map[string]interface{}{
 				{
-					"entityId":  entityID,
+					"entityId":   entityID,
 					"entityType": "APPLIANCE",
 					"parameters": map[string]interface{}{
 						"action": "turnOff",
@@ -527,10 +542,10 @@ func (c *Client) ControlSmartHome(entityID string, action string, value interfac
 		payload = map[string]interface{}{
 			"controlRequests": []map[string]interface{}{
 				{
-					"entityId":  entityID,
+					"entityId":   entityID,
 					"entityType": "APPLIANCE",
 					"parameters": map[string]interface{}{
-						"action": "setBrightness",
+						"action":     "setBrightness",
 						"brightness": value,
 					},
 				},
@@ -546,60 +561,76 @@ func (c *Client) ControlSmartHome(entityID string, action string, value interfac
 
 // fetchActivityCSRF retrieves the CSRF token needed for activity/history endpoints
 func (c *Client) fetchActivityCSRF() error {
-	activityURL := fmt.Sprintf("https://www.%s/alexa-privacy/apd/activity?ref=activityHistory", c.amazonDomain)
-
-	req, err := http.NewRequest("GET", activityURL, nil)
-	if err != nil {
-		return err
+	tryURLs := []string{
+		fmt.Sprintf("https://www.%s/alexa-privacy/apd/activity?ref=activityHistory", c.localDomain()),
+		fmt.Sprintf("https://www.%s/alexa-privacy/apd/activity?ref=activityHistory", c.amazonDomain),
+		"https://www.amazon.com/alexa-privacy/apd/activity?ref=activityHistory",
 	}
 
-	req.Header.Set("Cookie", c.cookies)
-	req.Header.Set("Accept", "text/html,application/xhtml+xml")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+	for _, activityURL := range tryURLs {
+		req, err := http.NewRequest("GET", activityURL, nil)
+		if err != nil {
+			continue
+		}
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
+		req.Header.Set("Cookie", c.cookies)
+		req.Header.Set("Accept", "text/html,application/xhtml+xml")
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			continue
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			continue
+		}
+
+		// First, check response cookies for csrf directly
+		for _, ck := range resp.Cookies() {
+			if ck.Name == "csrf" && ck.Value != "" {
+				c.activityCSRF = ck.Value
+				return nil
+			}
+		}
+
+		bodyStr := string(body)
+
+		// Try multiple patterns for the CSRF token
+		re := regexp.MustCompile(`<meta name="csrf-token" content="([^"]+)"`)
+		matches := re.FindStringSubmatch(bodyStr)
+		if len(matches) >= 2 {
+			c.activityCSRF = matches[1]
+			return nil
+		}
+
+		re2 := regexp.MustCompile(`data-csrf="([^"]+)"`)
+		matches = re2.FindStringSubmatch(bodyStr)
+		if len(matches) >= 2 {
+			c.activityCSRF = matches[1]
+			return nil
+		}
+
+		re3 := regexp.MustCompile(`"csrfToken"\s*:\s*"([^"]+)"`)
+		matches = re3.FindStringSubmatch(bodyStr)
+		if len(matches) >= 2 {
+			c.activityCSRF = matches[1]
+			return nil
+		}
+
+		re4 := regexp.MustCompile(`anti-csrftoken-a2z['":\s]+['"]([^'"]+)['"]`)
+		matches = re4.FindStringSubmatch(bodyStr)
+		if len(matches) >= 2 {
+			c.activityCSRF = matches[1]
+			return nil
+		}
 	}
-	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-
-	bodyStr := string(body)
-
-	// Try multiple patterns for the CSRF token
-	// Pattern 1: meta tag
-	re := regexp.MustCompile(`<meta name="csrf-token" content="([^"]+)"`)
-	matches := re.FindStringSubmatch(bodyStr)
-	if len(matches) >= 2 {
-		c.activityCSRF = matches[1]
-		return nil
-	}
-
-	// Pattern 2: data attribute
-	re2 := regexp.MustCompile(`data-csrf="([^"]+)"`)
-	matches = re2.FindStringSubmatch(bodyStr)
-	if len(matches) >= 2 {
-		c.activityCSRF = matches[1]
-		return nil
-	}
-
-	// Pattern 3: JavaScript variable
-	re3 := regexp.MustCompile(`"csrfToken"\s*:\s*"([^"]+)"`)
-	matches = re3.FindStringSubmatch(bodyStr)
-	if len(matches) >= 2 {
-		c.activityCSRF = matches[1]
-		return nil
-	}
-
-	// Pattern 4: anti-csrf in any form
-	re4 := regexp.MustCompile(`anti-csrftoken-a2z['":\s]+['"]([^'"]+)['"]`)
-	matches = re4.FindStringSubmatch(bodyStr)
-	if len(matches) >= 2 {
-		c.activityCSRF = matches[1]
+	// Practical fallback: in many accounts this matches the required anti-csrftoken-a2z
+	if c.csrf != "" {
+		c.activityCSRF = c.csrf
 		return nil
 	}
 
@@ -608,11 +639,11 @@ func (c *Client) fetchActivityCSRF() error {
 
 // HistoryRecord represents a voice history record
 type HistoryRecord struct {
-	RecordKey       string    `json:"recordKey"`
-	Timestamp       int64     `json:"timestamp"`
-	Device          string    `json:"device"`
-	CustomerUtterance string  `json:"customerUtterance"` // What you said (ASR)
-	AlexaResponse   string    `json:"alexaResponse"`     // What Alexa said (TTS)
+	RecordKey         string `json:"recordKey"`
+	Timestamp         int64  `json:"timestamp"`
+	Device            string `json:"device"`
+	CustomerUtterance string `json:"customerUtterance"` // What you said (ASR)
+	AlexaResponse     string `json:"alexaResponse"`     // What Alexa said (TTS)
 }
 
 // GetCustomerHistoryRecords retrieves recent voice activity history
@@ -624,48 +655,75 @@ func (c *Client) GetCustomerHistoryRecords(startTime, endTime int64) ([]HistoryR
 		}
 	}
 
-	// Build URL with time range
-	historyURL := fmt.Sprintf(
-		"https://www.%s/alexa-privacy/apd/rvh/customer-history-records-v2/?startTime=%d&endTime=%d&pageType=VOICE_HISTORY",
-		c.amazonDomain, startTime, endTime,
-	)
+	tryDomains := []string{c.localDomain(), c.amazonDomain, "amazon.com"}
+	seen := map[string]bool{}
+	var respBody []byte
+	var lastErr error
+	var done bool
 
-	body := bytes.NewReader([]byte(`{"previousRequestToken": null}`))
-	req, err := http.NewRequest("POST", historyURL, body)
-	if err != nil {
-		return nil, err
+	for _, d := range tryDomains {
+		if d == "" || seen[d] {
+			continue
+		}
+		seen[d] = true
+
+		historyURL := fmt.Sprintf(
+			"https://www.%s/alexa-privacy/apd/rvh/customer-history-records-v2/?startTime=%d&endTime=%d&pageType=VOICE_HISTORY",
+			d, startTime, endTime,
+		)
+
+		body := bytes.NewReader([]byte(`{"previousRequestToken": null}`))
+		req, err := http.NewRequest("POST", historyURL, body)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		req.Header.Set("Cookie", c.cookies)
+		req.Header.Set("csrf", c.csrf)
+		req.Header.Set("anti-csrftoken-a2z", c.activityCSRF)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/plain, */*")
+		req.Header.Set("Accept-Language", "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7")
+		req.Header.Set("Origin", fmt.Sprintf("https://www.%s", d))
+		req.Header.Set("Referer", fmt.Sprintf("https://www.%s/alexa-privacy/apd/activity?ref=activityHistory", d))
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		b, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			lastErr = readErr
+			continue
+		}
+
+		if resp.StatusCode >= 400 {
+			lastErr = fmt.Errorf("history API error %d: %s", resp.StatusCode, string(b))
+			continue
+		}
+
+		respBody = b
+		done = true
+		break
 	}
 
-	req.Header.Set("Cookie", c.cookies)
-	req.Header.Set("csrf", c.csrf)
-	req.Header.Set("anti-csrftoken-a2z", c.activityCSRF)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/plain, */*")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
-	req.Header.Set("Origin", fmt.Sprintf("https://www.%s", c.amazonDomain))
-	req.Header.Set("Referer", fmt.Sprintf("https://www.%s/alexa-privacy/apd/activity?ref=activityHistory", c.amazonDomain))
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("history API error %d: %s", resp.StatusCode, string(respBody))
+	if !done {
+		if lastErr != nil {
+			return nil, lastErr
+		}
+		return nil, fmt.Errorf("history API failed on all candidate domains")
 	}
 
 	// Parse the response
 	var result struct {
 		CustomerHistoryRecords []struct {
-			RecordKey              string `json:"recordKey"`
-			Timestamp              int64  `json:"timestamp"`
+			RecordKey               string `json:"recordKey"`
+			Timestamp               int64  `json:"timestamp"`
 			VoiceHistoryRecordItems []struct {
 				RecordItemType string `json:"recordItemType"`
 				TranscriptText string `json:"transcriptText"`
@@ -751,7 +809,7 @@ func (c *Client) Ask(device *Device, question string, timeout time.Duration) (st
 
 			// Check if the utterance matches our question (case-insensitive partial match)
 			if record.CustomerUtterance != "" &&
-			   strings.Contains(strings.ToLower(record.CustomerUtterance), strings.ToLower(question[:min(len(question), 20)])) {
+				strings.Contains(strings.ToLower(record.CustomerUtterance), strings.ToLower(question[:min(len(question), 20)])) {
 				if record.AlexaResponse != "" {
 					return record.AlexaResponse, nil
 				}
@@ -774,9 +832,9 @@ func mustJSON(v interface{}) string {
 	return string(data)
 }
 
-// locale returns the appropriate locale for the user's Amazon domain
+// locale returns the appropriate locale for the user's Amazon local domain
 func (c *Client) locale() string {
-	switch c.amazonDomain {
+	switch c.localDomain() {
 	case "amazon.com":
 		return "en-US"
 	case "amazon.co.uk":
@@ -811,7 +869,7 @@ func (c *Client) locale() string {
 // avsURL returns the AVS API base URL
 func (c *Client) avsURL() string {
 	// AVS has regional endpoints
-	switch c.amazonDomain {
+	switch c.localDomain() {
 	case "amazon.com", "amazon.ca", "amazon.com.br":
 		return "https://avs-alexa-12-na.amazon.com"
 	case "amazon.co.uk", "amazon.de", "amazon.fr", "amazon.it", "amazon.es", "amazon.in":
@@ -1143,7 +1201,7 @@ func (c *Client) buildAVSContext() []map[string]interface{} {
 			},
 			"payload": map[string]interface{}{
 				"dialog": map[string]interface{}{
-					"interface":            "SpeechSynthesizer",
+					"interface":              "SpeechSynthesizer",
 					"idleTimeInMilliseconds": 100000,
 				},
 			},
@@ -1184,13 +1242,13 @@ func (c *Client) buildAVSContext() []map[string]interface{} {
 				"name":      "PlaybackState",
 			},
 			"payload": map[string]interface{}{
-				"state":               "IDLE",
-				"shuffle":             "NOT_SHUFFLED",
-				"repeat":              "NOT_REPEATED",
-				"favorite":            "NOT_RATED",
+				"state":                "IDLE",
+				"shuffle":              "NOT_SHUFFLED",
+				"repeat":               "NOT_REPEATED",
+				"favorite":             "NOT_RATED",
 				"positionMilliseconds": 0,
-				"supportedOperations": []string{"Play", "Pause", "Previous", "Next"},
-				"players":             []interface{}{},
+				"supportedOperations":  []string{"Play", "Pause", "Previous", "Next"},
+				"players":              []interface{}{},
 			},
 		},
 		{
@@ -1276,8 +1334,8 @@ func (c *Client) buildAVSContext() []map[string]interface{} {
 			"height": 932,
 		},
 		"scrollable": map[string]interface{}{
-			"direction":    "vertical",
-			"allowForward": false,
+			"direction":     "vertical",
+			"allowForward":  false,
 			"allowBackward": true,
 		},
 		"elements": []interface{}{},

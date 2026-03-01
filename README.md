@@ -39,11 +39,13 @@ alexacli auth
 
 This downloads [alexa-cookie-cli](https://github.com/adn77/alexa-cookie-cli) on first run, opens a browser at http://127.0.0.1:8080 for Amazon login, and automatically captures and saves your refresh token.
 
-For non-US accounts:
+For non-US accounts (recommended split-domain login flow):
 
 ```bash
-alexacli auth --domain amazon.de
-alexacli auth --domain amazon.co.uk
+# Base auth domain (.com) + local marketplace country page (.it/.de/.co.uk...)
+alexacli auth --domain amazon.com --country amazon.it
+alexacli auth --domain amazon.com --country amazon.de
+alexacli auth --domain amazon.com --country amazon.co.uk
 ```
 
 ### Manual Token
@@ -68,6 +70,21 @@ alexacli auth logout
 ```
 
 Configuration is stored in `~/.alexa-cli/config.json`.
+
+### Config fields
+
+```json
+{
+  "refresh_token": "Atnr|...",
+  "amazon_domain": "amazon.com",
+  "amazon_local": "amazon.it",
+  "default_device": "YOUR_DEVICE_SERIAL"
+}
+```
+
+- `amazon_domain`: auth/token domain (usually `amazon.com`)
+- `amazon_local`: local marketplace/runtime domain (e.g. `amazon.it`, `amazon.de`)
+- If `amazon_local` is omitted, the CLI falls back to `amazon_domain`.
 
 ## Usage
 
@@ -353,6 +370,12 @@ alexacli command "turn on lights" -d Kitchen --verbose
 
 Run `alexacli auth` to configure your refresh token.
 
+For EU/IT accounts, prefer:
+
+```bash
+alexacli auth --domain amazon.com --country amazon.it
+```
+
 ### Device not found
 
 Use `alexacli devices` to see exact device names, then match them in your commands. Partial matching is supported.
@@ -365,9 +388,12 @@ Try running the same command with `alexacli command` instead - this sends it as 
 
 This CLI uses the same unofficial API that the Alexa mobile app uses. It:
 
-1. Exchanges your refresh token for session cookies
-2. Obtains a CSRF token from alexa.amazon.com
-3. Sends commands to pitangui.amazon.com (US) or layla.amazon.com (EU)
+1. Exchanges your refresh token for session cookies via Amazon auth (`api.amazon.com` with your `amazon_domain`)
+2. Obtains CSRF tokens from Alexa web endpoints (`alexa.*`, with fallback hosts)
+3. Sends command APIs to regional runtime endpoints:
+   - US/CA/BR/IN: `pitangui.*`
+   - EU (including IT): `layla.amazon.com`
+4. For history/privacy APIs, uses `www.<amazon_local>` with fallback to auth/global domains when needed (to handle temporary marketplace-side blocks)
 
 This approach is used by many popular projects including [alexa-remote-control](https://github.com/thorsten-gehrig/alexa-remote-control) and [Home Assistant's Alexa integration](https://github.com/alandtse/alexa_media_player).
 
