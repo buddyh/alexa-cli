@@ -68,7 +68,7 @@ func getClientWithFlags(flags *rootFlags) (*api.Client, error) {
 		return nil, err
 	}
 
-	client, err := api.NewClient(cfg.RefreshToken, cfg.AmazonDomain)
+	client, err := api.NewClientWithLocal(cfg.RefreshToken, cfg.AmazonDomain, cfg.AmazonLocal)
 	if err != nil {
 		return nil, err
 	}
