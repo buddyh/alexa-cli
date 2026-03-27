@@ -46,6 +46,7 @@ brews:
   - repository:
       owner: buddyh
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://github.com/buddyh/alexa-cli"
     description: "CLI for controlling Amazon Alexa devices"
     license: "MIT"
