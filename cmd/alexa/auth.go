@@ -37,6 +37,7 @@ Or set the ALEXA_REFRESH_TOKEN environment variable.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := getFormatter(flags)
+			country = normalizeLocalDomain(domain, country)
 
 			var token string
 			if len(args) > 0 {
@@ -93,7 +94,7 @@ Or set the ALEXA_REFRESH_TOKEN environment variable.`,
 	}
 
 	cmd.Flags().StringVar(&domain, "domain", "amazon.com", "Base Amazon domain for login/token exchange (usually amazon.com)")
-	cmd.Flags().StringVar(&country, "country", "amazon.it", "Marketplace country page for login (e.g. amazon.it, amazon.de)")
+	cmd.Flags().StringVar(&country, "country", "", "Marketplace country page for login (defaults to --domain)")
 
 	cmd.AddCommand(newAuthStatusCmd(flags))
 	cmd.AddCommand(newAuthLogoutCmd(flags))
@@ -171,6 +172,16 @@ func newAuthLogoutCmd(flags *rootFlags) *cobra.Command {
 			return out.Success(fmt.Sprintf("Credentials removed from %s", path))
 		},
 	}
+}
+
+func normalizeLocalDomain(domain, country string) string {
+	if country != "" {
+		return country
+	}
+	if domain != "" {
+		return domain
+	}
+	return "amazon.com"
 }
 
 // ensureCookieCLI checks for the alexa-cookie-cli binary and downloads it if missing.

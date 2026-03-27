@@ -684,7 +684,7 @@ func (c *Client) GetCustomerHistoryRecords(startTime, endTime int64) ([]HistoryR
 		req.Header.Set("anti-csrftoken-a2z", c.activityCSRF)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json, text/plain, */*")
-		req.Header.Set("Accept-Language", "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7")
+		req.Header.Set("Accept-Language", acceptLanguageHeader(c.locale()))
 		req.Header.Set("Origin", fmt.Sprintf("https://www.%s", d))
 		req.Header.Set("Referer", fmt.Sprintf("https://www.%s/alexa-privacy/apd/activity?ref=activityHistory", d))
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -830,6 +830,19 @@ func min(a, b int) int {
 func mustJSON(v interface{}) string {
 	data, _ := json.Marshal(v)
 	return string(data)
+}
+
+func acceptLanguageHeader(locale string) string {
+	if locale == "" {
+		return "en-US,en;q=0.9"
+	}
+
+	language := strings.SplitN(locale, "-", 2)[0]
+	if language == locale {
+		return locale + ",en-US;q=0.8,en;q=0.7"
+	}
+
+	return fmt.Sprintf("%s,%s;q=0.9,en-US;q=0.8,en;q=0.7", locale, language)
 }
 
 // locale returns the appropriate locale for the user's Amazon local domain
