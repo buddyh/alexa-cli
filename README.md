@@ -415,3 +415,7 @@ Without these projects' reverse-engineering efforts and documentation, this CLI 
 ## License
 
 MIT
+
+## Download History
+
+[![Download History](https://skill-history.com/chart/buddyh/alexa-cli.svg)](https://skill-history.com/buddyh/alexa-cli)
