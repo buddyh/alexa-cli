@@ -1,12 +1,18 @@
 BINARY_NAME=alexacli
+POLLER_BINARY_NAME=alexa-poller
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 BUILD_TIME=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS=-ldflags "-X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME)"
 
-.PHONY: build install clean test
+.PHONY: build build-poller build-tools install clean test
 
 build:
 	go build $(LDFLAGS) -o bin/$(BINARY_NAME) ./cmd/alexa
+
+build-poller:
+	go build -ldflags "-X main.version=$(VERSION)" -o bin/$(POLLER_BINARY_NAME) ./cmd/alexa-poller
+
+build-tools: build build-poller
 
 install: build
 	cp bin/$(BINARY_NAME) /usr/local/bin/
