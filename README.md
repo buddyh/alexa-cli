@@ -12,6 +12,8 @@ A command-line interface for controlling Amazon Alexa devices using the unoffici
 brew install buddyh/tap/alexacli
 ```
 
+This installs both `alexacli` and the companion `alexa-poller` binary.
+
 ### Go
 
 ```bash
@@ -252,31 +254,206 @@ Output shows both your messages (USER) and Alexa's responses (ALEXA):
 
 `alexa-poller` is a companion binary for route-based voice automation. It listens for activation phrases in Alexa activity and dispatches the remaining text to a destination such as OpenClaw, a shell command, or stdout.
 
-The default source mode is `auto`, which prefers Alexa+ conversation fragments when available and falls back to voice history for compatibility.
+Use it when you want to say something like "clawtto summarize my unread emails" to an Echo device and have the payload `summarize my unread emails` routed to an automation.
+
+#### Quick Start
 
 ```bash
-# Route "clawtto ..." from one device into OpenClaw
+# Authenticate first. alexa-poller uses the same config as alexacli.
+alexacli auth
+
+# Route "clawtto ..." from one Echo device into OpenClaw's main agent.
 alexa-poller route add clawtto --device "Echo Show" --to openclaw:main --source auto
 
-# Print matched payloads instead of dispatching them
-alexa-poller route add house --to stdout
-
-# Execute a shell command with the matched text
-alexa-poller route add brief me --to 'exec:/Users/buddy/bin/dispatch "{{text}}"'
-
-# Review configured routes
+# Review configured routes.
 alexa-poller route list
 
-# Run the poller
+# Start watching Alexa activity.
 alexa-poller run
 ```
 
-Route behavior:
-- Default match mode is `prefix`, so `clawtto summarize my unread emails` dispatches `summarize my unread emails`.
-- Built-in ignore phrases include `nevermind` and `ignore this`.
-- Optional acknowledgements can be spoken back on the originating device with `--ack`.
+If you say `clawtto summarize my unread emails`, the route dispatches `summarize my unread emails`.
 
-The poller stores route config in `~/.alexa-cli/poller.json` and its dedupe state in `~/.alexa-cli/poller-state.json`.
+#### Route Management
+
+```bash
+# Add a route.
+alexa-poller route add clawtto --device "Echo Show" --to openclaw:main
+
+# Add a multi-word activation phrase. Quote it so it is passed as one argument.
+alexa-poller route add "brief me" --to 'exec:/Users/buddy/bin/dispatch "{{text}}"'
+
+# Print matched payloads instead of dispatching them.
+alexa-poller route add house --to stdout
+
+# List routes for humans.
+alexa-poller route list
+
+# List routes as JSON for scripts.
+alexa-poller route list --json
+
+# Remove a route by ID from route list output.
+alexa-poller route remove route-abc123ef
+```
+
+Routes are stored in `~/.alexa-cli/poller.json`.
+
+Example config:
+
+```json
+{
+  "routes": [
+    {
+      "id": "route-abc123ef",
+      "phrase": "clawtto",
+      "device": "Echo Show",
+      "source": "auto",
+      "match": "prefix",
+      "ignore": ["nevermind", "ignore this"],
+      "action": {
+        "type": "openclaw",
+        "agent": "main"
+      },
+      "ack": {
+        "text": "Sent"
+      }
+    }
+  ]
+}
+```
+
+#### Sources
+
+`--source` controls where the poller looks for activation phrases:
+
+| Source | Behavior |
+|--------|----------|
+| `auto` | Default. Checks Alexa+ conversation fragments first, then voice history. |
+| `conversation` | Only checks Alexa+ conversation fragments. Requires Alexa+ conversations for the account/device. |
+| `history` | Only checks standard Alexa voice activity history. Best compatibility fallback. |
+
+Use `auto` unless you know you need one backend. If Alexa+ is not enabled or fragments are unavailable, `auto` still attempts history polling.
+
+#### Match Modes
+
+`--match` controls how the activation phrase is found:
+
+| Match | Example input | Payload |
+|-------|---------------|---------|
+| `prefix` | `clawtto summarize my unread emails` | `summarize my unread emails` |
+| `contains` | `Alexa, brief me on today` with phrase `brief me` | `on today` |
+
+`prefix` is the default and is usually safer because ordinary speech is less likely to accidentally trigger a route. `contains` is useful when Alexa transcription tends to add words before your phrase.
+
+The payload must not be empty. Saying only `clawtto` will not dispatch.
+
+#### Destinations
+
+`--to` selects what receives the matched payload:
+
+| Destination | Format | Behavior |
+|-------------|--------|----------|
+| OpenClaw default agent | `openclaw` | Runs `openclaw agent --message <payload> --agent main`. |
+| OpenClaw named agent | `openclaw:<agent>` | Runs `openclaw agent --message <payload> --agent <agent>`. |
+| Shell command | `exec:<command>` | Runs the command through `/bin/sh -c`; `{{text}}` is replaced with the payload. |
+| Stdout | `stdout` | Prints the timestamp, route phrase, and payload. Useful for testing. |
+
+Examples:
+
+```bash
+# Send to OpenClaw's main agent.
+alexa-poller route add clawtto --to openclaw:main
+
+# Send to a named OpenClaw agent.
+alexa-poller route add research --to openclaw:research
+
+# Run a local script. Quote the destination so the shell preserves {{text}}.
+alexa-poller route add "brief me" --to 'exec:/Users/buddy/bin/dispatch "{{text}}"'
+
+# Test matching without side effects.
+alexa-poller route add house --to stdout
+```
+
+For `exec:` destinations, treat the payload as untrusted user input. Prefer passing `{{text}}` as a quoted argument to a script you control instead of interpolating it into a complex shell pipeline.
+
+#### Device Filtering
+
+Use `--device` to limit a route to one Echo device:
+
+```bash
+alexa-poller route add clawtto --device "Kitchen Echo" --to stdout
+```
+
+The device name must match the Alexa activity source device name. Use `alexacli devices` and `alexacli conversations` to inspect available names. If `--device` is omitted, any device can trigger the route.
+
+#### Ignore Phrases and Acknowledgements
+
+The poller always ignores activation attempts that start with:
+
+- `nevermind`
+- `ignore this`
+
+Add more ignore phrases with `--ignore`:
+
+```bash
+alexa-poller route add clawtto --ignore "cancel that" --ignore "scratch that"
+```
+
+Use `--ack` to have Alexa speak a short acknowledgement after a route dispatches:
+
+```bash
+alexa-poller route add clawtto --device "Echo Show" --to openclaw:main --ack "Sent"
+```
+
+If `--device` is set, the acknowledgement is spoken on that device. Otherwise, the poller tries to speak on the originating device from the matched event.
+
+#### Running the Poller
+
+```bash
+alexa-poller run
+```
+
+On startup, the poller loads devices, checks configured sources, and seeds its dedupe state with existing records. This prevents old Alexa history or conversation fragments from firing as soon as the process starts. After the initial seed, only new matching events dispatch.
+
+The poller stores dedupe state in `~/.alexa-cli/poller-state.json`, so it can restart without replaying already-seen records.
+
+By default the poller checks every 5 seconds. Advanced users can set `pollInterval` in `~/.alexa-cli/poller.json`:
+
+```json
+{
+  "pollInterval": "2s",
+  "routes": []
+}
+```
+
+Run it under your preferred process supervisor for long-lived automation, such as `launchd`, `systemd`, `tmux`, or a user-level service wrapper.
+
+#### End-to-End Test Route
+
+Use `stdout` first when validating a new account, device, or activation phrase:
+
+```bash
+alexa-poller route add poller-test --device "Echo Show" --source history --to stdout
+alexa-poller run
+```
+
+Say `poller-test hello from the kitchen`. Expected output:
+
+```text
+[2026-06-26T15:00:00-04:00] poller-test -> hello from the kitchen
+```
+
+After that works, change `--to` to your real destination.
+
+#### Poller Files
+
+| Path | Purpose |
+|------|---------|
+| `~/.alexa-cli/config.json` | Shared `alexacli` auth/config. |
+| `~/.alexa-cli/poller.json` | Poller routes and optional poll interval. |
+| `~/.alexa-cli/poller-state.json` | Seen history/fragments used for dedupe. |
+
+Delete `poller-state.json` only if you intentionally want the poller to reseed from current Alexa activity on next startup.
 
 ### Audio Playback
 
@@ -344,6 +521,11 @@ alexacli speak "test" -d Kitchen --json
 | `alexacli auth` | Browser login or manual token setup | Working |
 | `alexacli auth status` | Show auth status (with `--verify`) | Working |
 | `alexacli auth logout` | Remove stored credentials | Working |
+| `alexa-poller route add <phrase>` | Add an activation phrase route | Working |
+| `alexa-poller route list` | List configured poller routes | Working |
+| `alexa-poller route list --json` | List poller routes as JSON | Working |
+| `alexa-poller route remove <id>` | Remove a poller route | Working |
+| `alexa-poller run` | Watch Alexa activity and dispatch route matches | Working |
 | `alexacli routine list` | List routines | WIP |
 | `alexacli routine run <name>` | Execute routine | WIP |
 | `alexacli sh list` | List smart home devices | WIP |
@@ -418,6 +600,43 @@ Use `alexacli devices` to see exact device names, then match them in your comman
 
 Try running the same command with `alexacli command` instead - this sends it as a voice command which has broader support.
 
+### Poller route not firing
+
+Start with a stdout route and the history source:
+
+```bash
+alexa-poller route add poller-test --device "Echo Show" --source history --to stdout
+alexa-poller run
+```
+
+Then say `poller-test hello`. If nothing prints:
+
+- Run `alexacli auth status --verify` to confirm credentials still work.
+- Run `alexacli history --limit 10` to confirm Alexa recorded the utterance.
+- Confirm the route device name matches the device shown in Alexa activity.
+- Try removing `--device` temporarily to rule out a device-name mismatch.
+- Try `--match contains` if Alexa adds words before your phrase.
+- Wait for a new utterance after starting the poller; startup seeds existing records and does not replay old history.
+
+### Poller dispatch failed
+
+For `openclaw` routes, make sure `openclaw` is installed and available on the `PATH` of the process running `alexa-poller`.
+
+For `exec:` routes:
+
+- Quote the destination so your shell does not expand `{{text}}`.
+- Prefer `--to 'exec:/path/to/script "{{text}}"'`.
+- Run the same command manually with sample text.
+- Check file permissions on the target script.
+
+### Poller repeats old events
+
+The poller dedupes records through `~/.alexa-cli/poller-state.json`. If that file is deleted, moved, or not writable, the poller will seed again on startup. It should not dispatch old events during the seed pass, but it may need one poll cycle before new events are eligible.
+
+### Poller sees no Alexa+ conversations
+
+Use `alexacli conversations` to confirm Alexa+ conversations are available for the account. If they are not available, use `--source history` or leave the route on the default `--source auto` so the poller can fall back to voice history.
+
 ## How It Works
 
 This CLI uses the same unofficial API that the Alexa mobile app uses. It:
@@ -428,6 +647,7 @@ This CLI uses the same unofficial API that the Alexa mobile app uses. It:
    - US/CA/BR/IN: `pitangui.*`
    - EU (including IT): `layla.amazon.com`
 4. For history/privacy APIs, uses `www.<amazon_local>` with fallback to auth/global domains when needed (to handle temporary marketplace-side blocks)
+5. `alexa-poller` reuses the same auth config, polls Alexa+ conversations and/or voice history, dedupes seen records, matches configured activation phrases, and dispatches the matched payload to the route destination.
 
 This approach is used by many popular projects including [alexa-remote-control](https://github.com/thorsten-gehrig/alexa-remote-control) and [Home Assistant's Alexa integration](https://github.com/alandtse/alexa_media_player).
 
