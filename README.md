@@ -16,6 +16,7 @@ brew install buddyh/tap/alexacli
 
 ```bash
 go install github.com/buddyh/alexa-cli/cmd/alexa@latest
+go install github.com/buddyh/alexa-cli/cmd/alexa-poller@latest
 ```
 
 ### Build locally
@@ -25,6 +26,9 @@ git clone https://github.com/buddyh/alexa-cli
 cd alexa-cli
 make build
 ./bin/alexacli --help
+
+make build-poller
+./bin/alexa-poller --help
 ```
 
 ## Authentication
@@ -243,6 +247,36 @@ Output shows both your messages (USER) and Alexa's responses (ALEXA):
 - Source citations when applicable
 
 > **Note:** Requires Alexa+ to be enabled on your Amazon account.
+
+### Activation Phrase Poller
+
+`alexa-poller` is a companion binary for route-based voice automation. It listens for activation phrases in Alexa activity and dispatches the remaining text to a destination such as OpenClaw, a shell command, or stdout.
+
+The default source mode is `auto`, which prefers Alexa+ conversation fragments when available and falls back to voice history for compatibility.
+
+```bash
+# Route "clawtto ..." from one device into OpenClaw
+alexa-poller route add clawtto --device "Echo Show" --to openclaw:main --source auto
+
+# Print matched payloads instead of dispatching them
+alexa-poller route add house --to stdout
+
+# Execute a shell command with the matched text
+alexa-poller route add brief me --to 'exec:/Users/buddy/bin/dispatch "{{text}}"'
+
+# Review configured routes
+alexa-poller route list
+
+# Run the poller
+alexa-poller run
+```
+
+Route behavior:
+- Default match mode is `prefix`, so `clawtto summarize my unread emails` dispatches `summarize my unread emails`.
+- Built-in ignore phrases include `nevermind` and `ignore this`.
+- Optional acknowledgements can be spoken back on the originating device with `--ack`.
+
+The poller stores route config in `~/.alexa-cli/poller.json` and its dedupe state in `~/.alexa-cli/poller-state.json`.
 
 ### Audio Playback
 
