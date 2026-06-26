@@ -11,9 +11,9 @@ import (
 
 func newSmartHomeCmd(flags *rootFlags) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "smarthome",
-		Short: "Control smart home devices",
-		Long:  `List and control smart home devices connected to Alexa.`,
+		Use:     "smarthome",
+		Short:   "Control smart home devices",
+		Long:    `List and control smart home devices connected to Alexa.`,
 		Aliases: []string{"sh", "home"},
 	}
 
