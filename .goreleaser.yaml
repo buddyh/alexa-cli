@@ -7,8 +7,23 @@ before:
     - go mod tidy
 
 builds:
-  - main: ./cmd/alexa
+  - id: alexacli
+    main: ./cmd/alexa
     binary: alexacli
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+  - id: alexa-poller
+    main: ./cmd/alexa-poller
+    binary: alexa-poller
     env:
       - CGO_ENABLED=0
     goos:
@@ -22,12 +37,14 @@ builds:
       - -s -w -X main.version={{.Version}}
 
 archives:
-  - format: tar.gz
+  - formats:
+      - tar.gz
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
 
 checksum:
   name_template: "checksums.txt"
@@ -52,5 +69,7 @@ brews:
     license: "MIT"
     install: |
       bin.install "alexacli"
+      bin.install "alexa-poller"
     test: |
       system "#{bin}/alexacli", "--help"
+      system "#{bin}/alexa-poller", "--help"
