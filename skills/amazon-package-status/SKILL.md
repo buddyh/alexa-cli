@@ -104,6 +104,31 @@ alexacli askplus -c "$CONV" --json \
 
 Add `-t 30` to raise the response timeout for big answers.
 
+## Defeating "privacy protected" titles (no settings change)
+
+A bulk "list my packages" returns `1 item (privacy protected)` — Alexa won't
+*volunteer* product names. But if **you name the item, it confirms full status**
+for it. So supply the names (e.g. from your order/shipment emails) and Alexa fills
+in the tracking. Batch many in one call:
+
+```bash
+alexacli askplus -c "$CONV" \
+  "One-line status (date + window + carrier) for each: FLEXISPOT desk, BenQ ScreenBar, Echo Show 21, APC Back-UPS."
+```
+→ each line comes back with its window/carrier/date. This is the cheap way to join
+"what" (names from email) with "when" (windows from Alexa+) without toggling the
+Alexa app privacy setting.
+
+## Live "stops away" when out for delivery
+
+Alexa+ reports real-time driver proximity for active deliveries:
+
+```bash
+alexacli askplus -c "$CONV" "Are any packages out for delivery? How many stops away is the driver?"
+# → "6 packages out for delivery, 9+ stops away…" (caps at 9+, then exact: "3 stops away")
+```
+Great for a live "out for delivery · N stops away" badge.
+
 ## Gotchas
 
 - **Privacy-protected item titles.** Alexa+ often returns "1 item (privacy
