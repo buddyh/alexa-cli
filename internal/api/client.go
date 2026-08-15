@@ -481,18 +481,70 @@ type SmartHomeDevice struct {
 	Reachable   bool   `json:"isReachable"`
 }
 
-// GetSmartHomeDevices returns all smart home devices
+// GraphQL query for smart home devices
+const smartHomeGraphQLQuery = `query Endpoints {
+  endpoints {
+    items {
+      endpointId
+      id
+      friendlyName
+      displayCategories {
+        primary {
+          value
+        }
+      }
+      legacyAppliance {
+        applianceId
+        applianceTypes
+        friendlyName
+        friendlyDescription
+        manufacturerName
+        entityId
+        isEnabled
+        applianceNetworkState
+      }
+    }
+  }
+}`
+
+// GetSmartHomeDevices returns all smart home devices using GraphQL API
 func (c *Client) GetSmartHomeDevices() ([]SmartHomeDevice, error) {
-	data, err := c.request("GET", "/api/phoenix", nil)
+	// Use GraphQL endpoint
+	payload := map[string]string{
+		"query": smartHomeGraphQLQuery,
+	}
+	
+	data, err := c.requestAlexa("POST", "/nexus/v1/graphql", payload)
 	if err != nil {
 		return nil, err
 	}
 
-	// Phoenix response has nested structure
+	// GraphQL response structure
 	var result struct {
-		NetworkDetail []struct {
-			ApplianceDetails map[string]SmartHomeDevice `json:"applianceDetails"`
-		} `json:"networkDetail"`
+		Data struct {
+			Endpoints struct {
+				Items []struct {
+					EndpointID   string `json:"endpointId"`
+					ID           string `json:"id"`
+					FriendlyName string `json:"friendlyName"`
+					DisplayCategories struct {
+						Primary struct {
+							Value string `json:"value"`
+						} `json:"primary"`
+					} `json:"displayCategories"`
+					LegacyAppliance *struct {
+						ApplianceID         string          `json:"applianceId"`
+						ApplianceTypes      []string        `json:"applianceTypes"`
+						FriendlyName        string          `json:"friendlyName"`
+						FriendlyDescription string          `json:"friendlyDescription"`
+						ManufacturerName    string          `json:"manufacturerName"`
+						EntityID            string          `json:"entityId"`
+						IsEnabled           bool            `json:"isEnabled"`
+						NetworkState        json.RawMessage `json:"applianceNetworkState"`
+					} `json:"legacyAppliance"`
+				} `json:"items"`
+			} `json:"endpoints"`
+		} `json:"data"`
 	}
 
 	if err := json.Unmarshal(data, &result); err != nil {
@@ -500,10 +552,36 @@ func (c *Client) GetSmartHomeDevices() ([]SmartHomeDevice, error) {
 	}
 
 	var devices []SmartHomeDevice
-	for _, network := range result.NetworkDetail {
-		for _, device := range network.ApplianceDetails {
-			devices = append(devices, device)
+	for _, item := range result.Data.Endpoints.Items {
+		device := SmartHomeDevice{
+			EntityID:  item.EndpointID,
+			Name:      item.FriendlyName,
+			Type:      item.DisplayCategories.Primary.Value,
+			Reachable: true,
 		}
+		
+		if item.LegacyAppliance != nil {
+			device.ApplianceID = item.LegacyAppliance.ApplianceID
+			device.EntityID = item.LegacyAppliance.EntityID
+			if device.Name == "" {
+				device.Name = item.LegacyAppliance.FriendlyName
+			}
+			if device.Type == "" && len(item.LegacyAppliance.ApplianceTypes) > 0 {
+				device.Type = item.LegacyAppliance.ApplianceTypes[0]
+			}
+			device.Description = item.LegacyAppliance.FriendlyDescription
+			// Parse network state JSON if present
+			if len(item.LegacyAppliance.NetworkState) > 0 {
+				var netState struct {
+					Reachability string `json:"reachability"`
+				}
+				if json.Unmarshal(item.LegacyAppliance.NetworkState, &netState) == nil {
+					device.Reachable = netState.Reachability == "REACHABLE"
+				}
+			}
+		}
+		
+		devices = append(devices, device)
 	}
 
 	return devices, nil
@@ -555,7 +633,7 @@ func (c *Client) ControlSmartHome(entityID string, action string, value interfac
 		return fmt.Errorf("unknown action: %s", action)
 	}
 
-	_, err := c.request("PUT", "/api/phoenix/state", payload)
+	_, err := c.requestAlexa("PUT", "/api/phoenix/state", payload)
 	return err
 }
 
